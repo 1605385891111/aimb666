@@ -1,0 +1,15 @@
+{
+  "name": "multi-ai-world",
+  "version": "1.0.0",
+  "description": "多人共享AI世界",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.6.1",
+    "dotenv": "^16.0.3",
+    "axios": "^1.4.0"
+  }
+}
