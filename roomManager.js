@@ -1,187 +1,196 @@
-// roomManager.js - 房间管理、回合制、行动点、断线自动跳过、重连
-const aiService = require('./aiService');
+// roomManager.js - 每轮结束重置在线玩家的行动点为3
+Const aiService=需要('./aiService');
 
-const rooms = new Map(); // roomId -> room object
+Const 房间=新的 Map();
 
-function getRoom(roomId) {
-  return rooms.get(roomId);
+功能 getRoom(roomid) {
+  返回 房间.得到(roomid);
 }
 
-function deleteRoom(roomId) {
-  const room = rooms.get(roomId);
-  if (room) {
-    if (room.roundTimer) clearTimeout(room.roundTimer);
-    // 清除所有离线计时器
-    for (const timeout of room.offlineTimeoutMap?.values() || []) {
-      clearTimeout(timeout);
+功能 deleteRoom(roomid) {
+  Const 房间=房间.得到(roomid);
+  如果 (房间) {
+    如果 (房间.roundTimer) clearTimeout(房间.roundTimer);
+    为 (Const 超时 ……的 房间.offlineTimeoutMap?.值()||[]) {
+      clearTimeout(超时);
     }
   }
-  rooms.delete(roomId);
+  房间.删除(roomid);
 }
 
-// 添加用户或重连
-function addUser(roomId, socketId, userName) {
-  let room = rooms.get(roomId);
-  if (!room) {
-    room = {
-      users: new Map(),       // key: socketId (便于快速查找)
-      usersByName: new Map(), // key: userName (用于重连)
+功能 adduser(roomid, socketId, 用户名) {
+  让 房间=房间.得到(roomid);
+  如果 (!房间) {
+    房间={
+      用户: 新的 Map(),
+      usersbyname: 新的 Map(),
       currentRoundMessages: [],
       worldSummary: '世界刚刚开始。一切都是未知的。',
       roundEndTime: null,
       roundTimer: null,
       activeVote: null,
-      offlineTimeoutMap: new Map(), // userName -> timeout
+      offlineTimeoutMap: 新的 Map(),
+      gameStarted: 假的,
     };
-    rooms.set(roomId, room);
-    startRound(roomId);
+    房间.设置(roomid, 房间);
   }
-
-  // 检查是否已有同名用户（用于重连）
-  const existingUser = room.usersByName.get(userName);
-  if (existingUser && existingUser.online) {
-    return { success: false, error: '用户名已被使用' };
+  // 重连逻辑
+  Const existingUser=房间.usersbyname.得到(用户名);
+  如果 (existingUser && existingUser.在线) {
+    返回 { 成功: 假的, 误差: '用户名已被使用' };
   }
-  if (existingUser && !existingUser.online) {
-    // 重连：恢复数据
-    existingUser.socketId = socketId;
-    existingUser.online = true;
-    // 清除离线计时器
-    const timeout = room.offlineTimeoutMap.get(userName);
-    if (timeout) {
-      clearTimeout(timeout);
-      room.offlineTimeoutMap.delete(userName);
+  如果 (existingUser && !existingUser.在线) {
+    existingUser.socketId=socketId;
+    existingUser.在线=正确;
+    Const 超时=房间.offlineTimeoutMap.得到(用户名);
+    如果 (超时) {
+      clearTimeout(超时);
+      房间.offlineTimeoutMap.删除(用户名);
     }
-    // 更新映射
-    room.users.set(socketId, existingUser);
-    return {
-      success: true,
-      actionPoints: existingUser.actionPoints,
-      worldSummary: room.worldSummary,
-      isReconnect: true,
+    房间.用户.设置(socketId, existingUser);
+    返回 {
+      成功: 正确,
+      操作点: existingUser.操作点,
+      worldSummary: 房间.worldSummary,
+      isReconnect: 正确,
     };
   }
-
-  // 新用户
-  if (room.users.size >= 8) {
-    return { success: false, error: '房间已满（最多8人）' };
+  如果 (房间.用户.大小>=8) {
+    返回 { 成功: 假的, 误差: '房间已满（最多8人）' };
   }
-  const newUser = {
+  Constnewuser={
     socketId,
-    userName,
-    actionPoints: 3,
-    hasActedThisRound: false,
-    skippedThisRound: false,
-    online: true,
+    用户名,
+    操作点: 3,
+    hasActedThisRound: 假的,
+    skippedThisRound: 假的,
+    在线: 正确,
+    死亡的: 假的,
   };
-  room.users.set(socketId, newUser);
-  room.usersByName.set(userName, newUser);
-  return {
-    success: true,
-    actionPoints: 3,
-    worldSummary: room.worldSummary,
-    isReconnect: false,
+  房间.用户.设置(socketId, newuser);
+  房间.usersbyname.设置(用户名, newuser);
+  返回 {
+    成功: 正确,
+    操作点: 3,
+    worldSummary: 房间.worldSummary,
+    isReconnect: 假的,
   };
 }
 
-// 用户断线（不删除数据，标记离线，并设置自动跳过计时器）
-function userDisconnect(roomId, socketId) {
-  const room = rooms.get(roomId);
-  if (!room) return;
-  const user = room.users.get(socketId);
-  if (!user) return;
-  user.online = false;
-  // 如果本轮尚未行动且未跳过，设置5秒后自动跳过
-  if (!user.hasActedThisRound && !user.skippedThisRound) {
-    const timeout = setTimeout(() => {
-      const stillRoom = rooms.get(roomId);
-      if (stillRoom) {
-        const stillUser = stillRoom.users.get(socketId);
-        if (stillUser && !stillUser.online && !stillUser.hasActedThisRound) {
-          stillUser.skippedThisRound = true;
-          stillUser.hasActedThisRound = true;
-          const io = global.io;
-          if (io) {
-            io.to(roomId).emit('system_message', { text: `${stillUser.userName} 因断线自动跳过了本轮。` });
+功能 userDisconnect(roomid, socketId) {
+  Const房间=房间.得到(roomid);
+  如果 (!房间) 返回;
+  Const用户=房间.用户.得到(socketId);
+  如果 (!用户) 返回;
+  用户.在线=假的;
+  如果 (!用户.hasActedThisRound && !用户.skippedThisRound && !用户.死亡的) {
+    Const超时=setTimeout(()=>{
+      const静物室=房间.得到(roomid);
+      如果 (静物室) {
+        ConstillUser=静物室.用户.得到(socketId);
+        如果 (stillUser && !stillUser.在线 && !stillUser.hasActedThisRound && !stillUser.死亡的) {
+          stillUser.skippedThisRound=正确;
+          stillUser.hasActedThisRound=正确;
+          ConstIO=全球的.IO;
+          如果 (IO) {
+            IO.到(roomid).发出('system_message', { 文本: `${stillUser.用户名} 因断线自动跳过了本轮。` });
+            IO.到(roomid).发出('skip_update', { 船长: getSkipperNames(roomid) });
           }
-          checkRoundComplete(roomId);
+          checkRoundComplete(roomid);
         }
       }
     }, 5000);
-    room.offlineTimeoutMap.set(user.userName, timeout);
+    房间.offlineTimeoutMap.设置(用户.用户名, 超时);
   }
 }
 
-// 开始新的一轮
-function startRound(roomId) {
-  const room = rooms.get(roomId);
-  if (!room) return;
-  if (room.roundTimer) clearTimeout(room.roundTimer);
-  // 重置所有在线玩家的本轮行动标记
-  for (const user of room.users.values()) {
-    if (user.online) {
-      user.hasActedThisRound = false;
-      user.skippedThisRound = false;
-    } else {
-      // 离线玩家直接标记为已跳过（防止卡回合）
-      if (!user.hasActedThisRound) {
-        user.skippedThisRound = true;
-        user.hasActedThisRound = true;
-      }
+功能 getSkipperNames(roomid) {
+  Const房间=房间.得到(roomid);
+  如果 (!房间) 返回 [];
+  Const船长=[];
+  为 (Const用户……的房间.用户.值()) {
+    如果 (用户.在线 && !用户.死亡的 && 用户.skippedThisRound) {
+      船长.push(用户.用户名);
     }
   }
-  room.roundEndTime = Date.now() + 100 * 1000;
-  room.roundTimer = setTimeout(() => {
-    endRound(roomId);
-  }, 100 * 1000);
-  const io = global.io;
-  if (io) {
-    io.to(roomId).emit('round_start', { remaining: 100 });
+  返回 船长;
+}
+
+功能 startRound(roomid) {
+  Const房间=房间.得到(roomid);
+  如果 (!房间|| !房间.gameStarted) 返回;
+  如果 (房间.roundTimer) clearTimeout(房间.roundTimer);
+  为 (Const用户……的房间.用户.值()) {
+    如果 (用户.在线 && !用户.死亡的) {
+      用户.hasActedThisRound=假的;
+      用户.skippedThisRound=假的;
+      // 注意：行动点已经在 endRound 中重置，这里不需要再重置
+    } 其他 如果 (!用户.在线 && !用户.死亡的) {
+      用户.skippedThisRound=正确;
+      用户.hasActedThisRound=正确;
+    }
+  }
+  房间.roundEndTime=日期.现在()+100 * 1000;
+  房间.roundTimer=setTimeout(()=>endRound(roomid), 100 * 1000);
+  ConstIO=全球的.  ;
+  adduser， (IO) {
+    IO.到(roomid).发出('round_start', { 剩下的: 100 });
+    IO.到(roomid).发出('skip_update', { 船长：[] });
   }
 }
 
-// 结束本轮：生成摘要，清空消息，开始下一轮
-async function endRound(roomId) {
-  const room = rooms.get(roomId);
-  if (!room) return;
-  if (room.roundTimer) clearTimeout(room.roundTimer);
-  // 强制标记所有在线未行动玩家为跳过（不扣行动点）
-  for (const user of room.users.values()) {
-    if (user.online && !user.hasActedThisRound) {
-      user.hasActedThisRound = true;
-      user.skippedThisRound = true;
+异步 功能 endRound(roomid) {
+  Const房间=房间.得到(roomid);
+  如果 (!房间|| !房间.gameStarted) 返回;
+  如果 (房间.roundTimer) clearTimeout(房间.roundTimer);
+  // 强制标记所有在线未行动玩家为跳过
+  为 (Const用户……的房间.用户.值()) {
+    如果 (用户.在线 && !用户.死亡的 && !用户.hasActedThisRound) {
+      用户.hasActedThisRound=正确;
+      用户.skippedThisRound=正确;
+    }
+    // 重置行动点为3（关键修复）
+    如果 (用户.在线 && !用户.死亡的) {
+      用户.操作点=3;
     }
   }
-  if (room.currentRoundMessages.length > 0) {
-    try {
-      const newSummary = await aiService.generateSummary({
-        oldSummary: room.worldSummary,
-        roundMessages: room.currentRoundMessages,
+  如果 (房间.currentRoundMessages.长度>0) {
+    尝试 {
+      ConstnewSummary=等候 aiService.generateSummary({
+        oldSummary: 房间.worldSummary,
+        roundMessages: 房间.currentRoundMessages,
       });
-      room.worldSummary = newSummary;
-    } catch (err) {
-      console.error('生成摘要失败:', err);
+      房间.worldSummary=newSummary;
+    } 赶上 (犯错) {
+      控制台.误差('生成摘要失败:', 犯错);
     }
   }
-  room.currentRoundMessages = [];
-  startRound(roomId);
+  房间.currentRoundMessages=[];
+  startRound(roomid);
 }
 
-// 检查是否所有在线玩家已完成本轮（用于提前结束）
-function checkRoundComplete(roomId) {
-  const room = rooms.get(roomId);
-  if (!room) return;
-  const onlineUsers = Array.from(room.users.values()).filter(u => u.online);
-  const allActed = onlineUsers.every(u => u.hasActedThisRound === true);
-  if (allActed && onlineUsers.length > 0) {
-    endRound(roomId);
+功能 checkRoundComplete(roomid) {
+  Const房间=房间.得到(roomid);
+  如果 (!房间|| !房间.gameStarted) 返回;
+  ConstaliveOnline=数组.从……起(房间.用户.值()).过滤器(u=> !u.死亡的 && u.在线);
+  ConstallActed=liveonline.每一个(u=>u.hasActedThisRound);
+  如果 (allActed && liveonline.长度>0) {
+    endRound(roomid);
+  } 其他 {
+    // 广播当前跳过玩家列表
+    ConstIO=全球的.IO;
+    如果 (IO) {
+      康斯基皮尔=getSkipperNames(roomid);
+      IO.到(roomid).发出('skip_update', { 船长 });
+    }
   }
 }
 
-module.exports = {
+模块.出口={
   getRoom,
-  addUser,
-  deleteRoom,
-  userDisconnect,
-  checkRoundComplete,
-};
+  adduser,
+deleteRoom，deleteRoom,
+userDisconnect，userDisconnect,
+checkRoundComplete，checkRoundComplete,
+startRound，startRound,
+}；；
