@@ -19,8 +19,6 @@ function deleteRoom(roomId) {
 
 function addUser(roomId, socketId, userName) {
   let room = rooms.get(roomId);
-  const isFirstUser = !room;
-
   if (!room) {
     room = {
       users: new Map(),
