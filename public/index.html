@@ -21,14 +21,38 @@
             <span id="round-timer">回合剩余: --</span>
             <span id="action-points">行动点: 3</span>
         </div>
+        <div class="info-bar">
+            <div class="player-list">
+                <strong>玩家列表</strong>
+                <ul id="player-list-ul"></ul>
+            </div>
+            <div class="skip-info">
+                <strong>已跳过本轮:</strong> <span id="skip-names">无</span>
+            </div>
+        </div>
         <div class="world-summary">
             <strong>世界摘要</strong>
             <p id="summary-text"></p>
         </div>
-        <div id="chat-messages" class="chat-box"></div>
-        <div class="input-area">
-            <textarea id="message-input" placeholder="输入消息... 以 / 开头的指令消耗1行动点（每轮限1次）" rows="2"></textarea>
-            <button id="send-btn">发送</button>
+        <div class="chat-layout">
+            <div class="chat-panel">
+                <div class="chat-header">个人世界（AI回应）</div>
+                <div id="chat-messages" class="chat-box"></div>
+                <div class="input-area">
+                    <textarea id="message-input" placeholder="输入消息... 以 / 开头的指令消耗行动点（每轮限1次）" rows="2"></textarea>
+                    <button id="send-btn">发送</button>
+                </div>
+            </div>
+            <div class="chat-panel">
+                <div class="chat-header">公共聊天（所有人可见）</div>
+                <div id="public-chat-messages" class="chat-box"></div>
+                <div class="input-area">
+                    <input type="text" id="public-input" placeholder="公共聊天...">
+                    <button id="public-send-btn">发送</button>
+                </div>
+            </div>
+        </div>
+        <div class="action-buttons">
             <button id="skip-btn">跳过本轮指令</button>
             <button id="surrender-btn" class="danger">投降</button>
             <button id="vote-kick-btn" class="danger">踢人投票</button>
