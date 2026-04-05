@@ -1,4 +1,4 @@
-// client.js - 完整版，包含等待室、准备、开始游戏、公共聊天、游戏逻辑
+// client.js - 完整版，修复准备状态同步，优化界面
 let socket;
 let currentRoomId = null;
 let currentUserName = null;
@@ -61,7 +61,6 @@ joinBtn.onclick = () => {
         actionPointsSpan.innerText = `行动点: ${response.actionPoints}`;
         summaryText.innerText = response.worldSummary;
 
-        // 显示等待室
         waitingRoomDiv.style.display = 'block';
         gamePlayArea.style.display = 'none';
         if (isOwner) {
@@ -71,13 +70,30 @@ joinBtn.onclick = () => {
             startGameBtn.style.display = 'none';
         }
 
-        // 监听准备状态更新
+        // 准备状态更新事件（关键修复）
         socket.on('player_ready_update', ({ readyList, allReady, ownerId }) => {
-            updateWaitingPlayers(readyList, allReady, ownerId);
-            if (allReady && isOwner) {
-                startGameBtn.disabled = false;
-            } else if (isOwner) {
-                startGameBtn.disabled = true;
+            // 更新等待室UI
+            waitingPlayersList.innerHTML = '';
+            if (readyList.length === 0) {
+                waitingPlayersList.innerText = '暂无玩家';
+            } else {
+                waitingPlayersList.innerText = '已准备：' + readyList.join(', ');
+            }
+            readyStatusSpan.innerText = allReady ? '全部准备' : '等待其他玩家准备';
+
+            // 同步当前玩家的准备按钮状态
+            const amIReady = readyList.includes(currentUserName);
+            if (amIReady) {
+                readyBtn.style.display = 'none';
+                unreadyBtn.style.display = 'inline-block';
+            } else {
+                readyBtn.style.display = 'inline-block';
+                unreadyBtn.style.display = 'none';
+            }
+
+            // 房主：根据 allReady 启用/禁用开始按钮
+            if (isOwner) {
+                startGameBtn.disabled = !allReady;
             }
         });
 
@@ -168,26 +184,12 @@ joinBtn.onclick = () => {
     });
 };
 
-function updateWaitingPlayers(readyList, allReady, ownerId) {
-    waitingPlayersList.innerHTML = '';
-    if (readyList.length === 0) {
-        waitingPlayersList.innerText = '暂无玩家';
-    } else {
-        waitingPlayersList.innerText = '已准备：' + readyList.join(', ');
-    }
-    readyStatusSpan.innerText = allReady ? '全部准备' : '等待其他玩家准备';
-}
-
 readyBtn.onclick = () => {
     socket.emit('player_ready', { roomId: currentRoomId, ready: true });
-    readyBtn.style.display = 'none';
-    unreadyBtn.style.display = 'inline-block';
 };
 
 unreadyBtn.onclick = () => {
     socket.emit('player_ready', { roomId: currentRoomId, ready: false });
-    readyBtn.style.display = 'inline-block';
-    unreadyBtn.style.display = 'none';
 };
 
 startGameBtn.onclick = () => {
