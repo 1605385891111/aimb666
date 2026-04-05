@@ -1,39 +1,194 @@
-// roomManager.js - 每轮结束重置在线玩家的行动点为3
-Const aiService=需要('./aiService');
+const aiService = require('./aiService');
 
-Const 房间=新的 Map();
+const rooms = new Map();
 
-功能 getRoom(roomid) {
-  返回 房间.得到(roomid);
+function getRoom(roomId) {
+  return rooms.get(roomId);
 }
 
-功能 deleteRoom(roomid) {
-  Const 房间=房间.得到(roomid);
-  如果 (房间) {
-    如果 (房间.roundTimer) clearTimeout(房间.roundTimer);
-    为 (Const 超时 ……的 房间.offlineTimeoutMap?.值()||[]) {
-      clearTimeout(超时);
+function deleteRoom(roomId) {
+  const room = rooms.get(roomId);
+  if (room) {
+    if (room.roundTimer) clearTimeout(room.roundTimer);
+    for (const timeout of room.offlineTimeoutMap?.values() || []) {
+      clearTimeout(timeout);
     }
   }
-  房间.删除(roomid);
+  rooms.delete(roomId);
 }
 
-功能 adduser(roomid, socketId, 用户名) {
-  让 房间=房间.得到(roomid);
-  如果 (!房间) {
-    房间={
-      用户: 新的 Map(),
-      usersbyname: 新的 Map(),
+function addUser(roomId, socketId, userName) {
+  let room = rooms.get(roomId);
+  if (!room) {
+    room = {
+      users: new Map(),
+      usersByName: new Map(),
       currentRoundMessages: [],
       worldSummary: '世界刚刚开始。一切都是未知的。',
       roundEndTime: null,
       roundTimer: null,
       activeVote: null,
-      offlineTimeoutMap: 新的 Map(),
-      gameStarted: 假的,
+      offlineTimeoutMap: new Map(),
+      gameStarted: false,
     };
-    房间.设置(roomid, 房间);
+    rooms.set(roomId, room);
   }
+  const existingUser = room.usersByName.get(userName);
+  if (existingUser && existingUser.online) {
+    return { success: false, error: '用户名已被使用' };
+  }
+  if (existingUser && !existingUser.online) {
+    existingUser.socketId = socketId;
+    existingUser.online = true;
+    const timeout = room.offlineTimeoutMap.get(userName);
+    if (timeout) {
+      clearTimeout(timeout);
+      room.offlineTimeoutMap.delete(userName);
+    }
+    room.users.set(socketId, existingUser);
+    return {
+      success: true,
+      actionPoints: existingUser.actionPoints,
+      worldSummary: room.worldSummary,
+      isReconnect: true,
+    };
+  }
+  if (room.users.size >= 8) {
+    return { success: false, error: '房间已满（最多8人）' };
+  }
+  const newUser = {
+    socketId,
+    userName,
+    actionPoints: 3,
+    hasActedThisRound: false,
+    skippedThisRound: false,
+    online: true,
+    dead: false,
+  };
+  room.users.set(socketId, newUser);
+  room.usersByName.set(userName, newUser);
+  return {
+    success: true,
+    actionPoints: 3,
+    worldSummary: room.worldSummary,
+    isReconnect: false,
+  };
+}
+
+function userDisconnect(roomId, socketId) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  const user = room.users.get(socketId);
+  if (!user) return;
+  user.online = false;
+  if (!user.hasActedThisRound && !user.skippedThisRound && !user.dead) {
+    const timeout = setTimeout(() => {
+      const stillRoom = rooms.get(roomId);
+      if (stillRoom) {
+        const stillUser = stillRoom.users.get(socketId);
+        if (stillUser && !stillUser.online && !stillUser.hasActedThisRound && !stillUser.dead) {
+          stillUser.skippedThisRound = true;
+          stillUser.hasActedThisRound = true;
+          const io = global.io;
+          if (io) {
+            io.to(roomId).emit('system_message', { text: `${stillUser.userName} 因断线自动跳过了本轮。` });
+            const skippers = getSkipperNames(roomId);
+            io.to(roomId).emit('skip_update', { skippers });
+          }
+          checkRoundComplete(roomId);
+        }
+      }
+    }, 5000);
+    room.offlineTimeoutMap.set(user.userName, timeout);
+  }
+}
+
+function getSkipperNames(roomId) {
+  const room = rooms.get(roomId);
+  if (!room) return [];
+  const skippers = [];
+  for (const user of room.users.values()) {
+    if (user.online && !user.dead && user.skippedThisRound) {
+      skippers.push(user.userName);
+    }
+  }
+  return skippers;
+}
+
+function startRound(roomId) {
+  const room = rooms.get(roomId);
+  if (!room || !room.gameStarted) return;
+  if (room.roundTimer) clearTimeout(room.roundTimer);
+  for (const user of room.users.values()) {
+    if (user.online && !user.dead) {
+      user.hasActedThisRound = false;
+      user.skippedThisRound = false;
+    } else if (!user.online && !user.dead) {
+      user.skippedThisRound = true;
+      user.hasActedThisRound = true;
+    }
+  }
+  room.roundEndTime = Date.now() + 100 * 1000;
+  room.roundTimer = setTimeout(() => endRound(roomId), 100 * 1000);
+  const io = global.io;
+  if (io) {
+    io.to(roomId).emit('round_start', { remaining: 100 });
+    io.to(roomId).emit('skip_update', { skippers: [] });
+  }
+}
+
+async function endRound(roomId) {
+  const room = rooms.get(roomId);
+  if (!room || !room.gameStarted) return;
+  if (room.roundTimer) clearTimeout(room.roundTimer);
+  for (const user of room.users.values()) {
+    if (user.online && !user.dead && !user.hasActedThisRound) {
+      user.hasActedThisRound = true;
+      user.skippedThisRound = true;
+    }
+    if (user.online && !user.dead) {
+      user.actionPoints = 3;
+    }
+  }
+  if (room.currentRoundMessages.length > 0) {
+    try {
+      const newSummary = await aiService.generateSummary({
+        oldSummary: room.worldSummary,
+        roundMessages: room.currentRoundMessages,
+      });
+      room.worldSummary = newSummary;
+    } catch (err) {
+      console.error('生成摘要失败:', err);
+    }
+  }
+  room.currentRoundMessages = [];
+  startRound(roomId);
+}
+
+function checkRoundComplete(roomId) {
+  const room = rooms.get(roomId);
+  if (!room || !room.gameStarted) return;
+  const aliveOnline = Array.from(room.users.values()).filter(u => !u.dead && u.online);
+  const allActed = aliveOnline.every(u => u.hasActedThisRound);
+  if (allActed && aliveOnline.length > 0) {
+    endRound(roomId);
+  } else {
+    const io = global.io;
+    if (io) {
+      const skippers = getSkipperNames(roomId);
+      io.to(roomId).emit('skip_update', { skippers });
+    }
+  }
+}
+
+module.exports = {
+  getRoom,
+  addUser,
+  deleteRoom,
+  userDisconnect,
+  checkRoundComplete,
+  startRound,
+};
   // 重连逻辑
   Const existingUser=房间.usersbyname.得到(用户名);
   如果 (existingUser && existingUser.在线) {
